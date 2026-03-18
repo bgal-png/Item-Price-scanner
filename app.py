@@ -451,8 +451,9 @@ if st.session_state.scan_results:
             return styles
 
         styled = (
-            df_display.drop(columns=["_status"])
+            df_display
             .style.apply(color_row, axis=1)
+            .hide(["_status"], axis="columns")
         )
         st.dataframe(styled, use_container_width=True, hide_index=True)
         st.markdown("---")
