@@ -118,19 +118,31 @@ def scrape_url(url: str) -> tuple[float | None, dict, str | None]:
     except Exception as e:
         raise RuntimeError(f"Request failed: {e}")
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    html = resp.text
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Store a debug snippet so we can inspect the raw HTML if needed
+    st.session_state["_debug_html"] = st.session_state.get("_debug_html", {})
+    st.session_state["_debug_html"][url] = html[:4000]
 
     h1 = soup.find("h1", class_=lambda c: c and "c-product-info__name" in c)
     product_name = h1.get_text(strip=True) if h1 else None
 
-    price_spans = soup.find_all("span", class_=lambda c: c and "c-offer__price" in c)
-    all_prices = []
-    for p in price_spans:
-        raw = p.get_text().replace("Kč", "").replace("\xa0", "").replace(" ", "").strip()
+    def _parse_price(text: str) -> float | None:
+        raw = text.replace("Kč", "").replace("\xa0", "").replace("\u00a0", "").replace(" ", "").replace(",", ".").strip()
         try:
-            all_prices.append(float(raw))
+            return float(raw)
         except ValueError:
-            pass
+            return None
+
+    # Try primary selector, then broader fallbacks
+    price_spans = (
+        soup.find_all("span", class_=lambda c: c and "c-offer__price" in c)
+        or soup.find_all(attrs={"data-testid": lambda v: v and "price" in v.lower()})
+        or soup.find_all(class_=lambda c: c and "price" in c.lower() and "offer" in c.lower())
+    )
+
+    all_prices = [p for p in (_parse_price(s.get_text()) for s in price_spans) if p is not None]
 
     if not all_prices:
         return None, {}, product_name
@@ -138,15 +150,22 @@ def scrape_url(url: str) -> tuple[float | None, dict, str | None]:
     overall_lowest = min(all_prices)
     catalog = {}
 
-    for btn in soup.find_all("a", attrs={"data-testid": "Offer Exit Button"}):
+    # Try primary shop-link selector, then broader fallback
+    offer_links = (
+        soup.find_all("a", attrs={"data-testid": "Offer Exit Button"})
+        or soup.find_all("a", attrs={"data-testid": lambda v: v and "offer" in v.lower()})
+    )
+
+    for btn in offer_links:
         label = unicodedata.normalize("NFD", btn.get("aria-label", "")).encode("ascii", "ignore").decode("utf-8").lower()
-        p_span = btn.find_previous("span", class_=lambda c: c and "c-offer__price" in c)
+        p_span = (
+            btn.find_previous("span", class_=lambda c: c and "c-offer__price" in c)
+            or btn.find_previous(attrs={"data-testid": lambda v: v and "price" in v.lower()})
+        )
         if p_span:
-            raw = p_span.get_text().replace("Kč", "").replace("\xa0", "").replace(" ", "").strip()
-            try:
-                catalog[label] = float(raw)
-            except ValueError:
-                pass
+            price = _parse_price(p_span.get_text())
+            if price is not None:
+                catalog[label] = price
 
     return overall_lowest, catalog, product_name
 
@@ -473,3 +492,10 @@ if st.session_state.scan_results:
         )
         st.dataframe(styled, use_container_width=True, hide_index=True)
         st.markdown("---")
+
+# Debug expander — shows raw HTML from last scan to diagnose selector issues
+if st.session_state.get("_debug_html"):
+    with st.expander("🔍 Debug: raw HTML snippets (first 4 000 chars per URL)"):
+        for _url, _snippet in st.session_state["_debug_html"].items():
+            st.caption(_url)
+            st.code(_snippet, language="html")
