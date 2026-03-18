@@ -118,12 +118,19 @@ def scrape_url(url: str) -> tuple[float | None, dict, str | None]:
     except Exception as e:
         raise RuntimeError(f"Request failed: {e}")
 
-    html = resp.text
+    html = resp.content.decode("utf-8", errors="replace")
     soup = BeautifulSoup(html, "html.parser")
 
-    # Store a debug snippet so we can inspect the raw HTML if needed
+    # Store debug info for diagnosing selector issues
+    import re as _re
+    _classes_with_price = sorted(set(_re.findall(r'class="([^"]*(?:price|offer|shop|eshop)[^"]*)"', html, _re.IGNORECASE)))
+    _kc_contexts = [html[max(0,m.start()-120):m.end()+60] for m in _re.finditer(r'K[cč]', html)][:15]
     st.session_state["_debug_html"] = st.session_state.get("_debug_html", {})
-    st.session_state["_debug_html"][url] = html[:4000]
+    st.session_state["_debug_html"][url] = {
+        "classes": _classes_with_price[:60],
+        "kc_contexts": _kc_contexts,
+        "body_snippet": html[html.find("<body"):html.find("<body")+6000] if "<body" in html else html[4000:10000],
+    }
 
     h1 = soup.find("h1", class_=lambda c: c and "c-product-info__name" in c)
     product_name = h1.get_text(strip=True) if h1 else None
@@ -493,9 +500,14 @@ if st.session_state.scan_results:
         st.dataframe(styled, use_container_width=True, hide_index=True)
         st.markdown("---")
 
-# Debug expander — shows raw HTML from last scan to diagnose selector issues
+# Debug expander — shows structured info to diagnose selector issues
 if st.session_state.get("_debug_html"):
-    with st.expander("🔍 Debug: raw HTML snippets (first 4 000 chars per URL)"):
-        for _url, _snippet in st.session_state["_debug_html"].items():
+    with st.expander("🔍 Debug info (open if prices not found)"):
+        for _url, _info in st.session_state["_debug_html"].items():
             st.caption(_url)
-            st.code(_snippet, language="html")
+            st.markdown("**CSS classes containing price/offer/shop:**")
+            st.code("\n".join(_info.get("classes", [])) or "(none found)", language="text")
+            st.markdown("**Contexts around 'Kč' in HTML:**")
+            st.code("\n---\n".join(_info.get("kc_contexts", [])) or "(none found)", language="html")
+            st.markdown("**Body start (6 000 chars):**")
+            st.code(_info.get("body_snippet", ""), language="html")
