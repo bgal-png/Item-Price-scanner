@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+scanner_settings.json
+*.xlsx
+*.xls
+*.csv
+*.log
+.DS_Store
