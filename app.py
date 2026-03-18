@@ -32,8 +32,17 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "cs,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Connection": "keep-alive",
 }
 
 # ---------------------------------------------------------------------------
@@ -97,7 +106,14 @@ def apply_rounding(price: float, rule: str) -> float:
 def scrape_url(url: str) -> tuple[float | None, dict, str | None]:
     """Returns (overall_lowest, catalog, product_name)."""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        # First hit the homepage to get cookies, then the product page
+        parsed = urlparse(url)
+        homepage = f"{parsed.scheme}://{parsed.netloc}/"
+        session.get(homepage, timeout=10)
+        time.sleep(1)
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
     except Exception as e:
         raise RuntimeError(f"Request failed: {e}")
