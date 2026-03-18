@@ -4,10 +4,9 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import unicodedata
 import math
-import json
-import os
 import time
 from urllib.parse import urlparse
+from supabase import create_client, Client
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -23,8 +22,6 @@ DEFAULT_SETTINGS = {
     "alert_threshold_type": "Kč",
     "competitors": [],
 }
-
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scanner_settings.json")
 
 HEADERS = {
     "User-Agent": (
@@ -46,24 +43,28 @@ HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Settings persistence
+# Supabase client
 # ---------------------------------------------------------------------------
-def load_settings_file() -> dict:
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+@st.cache_resource
+def get_supabase() -> Client:
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 
-def save_settings_file(settings: dict):
+def load_settings_db() -> dict:
     try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=2, ensure_ascii=False)
+        resp = get_supabase().table("shop_settings").select("shop, settings").execute()
+        return {row["shop"]: row["settings"] for row in resp.data}
     except Exception:
-        pass  # silently fail on cloud
+        return {}
+
+
+def save_settings_db(shop: str, settings: dict):
+    try:
+        get_supabase().table("shop_settings").upsert(
+            {"shop": shop, "settings": settings}
+        ).execute()
+    except Exception:
+        pass  # silently fail
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ def save_settings_file(settings: dict):
 # ---------------------------------------------------------------------------
 def init_state():
     if "shop_settings" not in st.session_state:
-        saved = load_settings_file()
+        saved = load_settings_db()
         st.session_state.shop_settings = {}
         for shop in DEFAULT_SHOPS:
             s = dict(DEFAULT_SETTINGS)
@@ -337,7 +338,7 @@ with st.sidebar:
                     "alert_threshold_type": alert_type,
                     "competitors": [c.strip() for c in comp_text.splitlines() if c.strip()],
                 })
-                save_settings_file(st.session_state.shop_settings)
+                save_settings_db(shop, st.session_state.shop_settings[shop])
                 st.success("Saved!")
 
             st.divider()
